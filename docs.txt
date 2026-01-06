@@ -1,0 +1,429 @@
+@memvid/sdk
+A single-file AI memory system for Node.js. Store documents, search with BM25 + vector ranking, and run RAG queries from a portable .mv2 file.
+
+Built on Rust via N-API. No database setup, no external services required.
+
+Install
+npm install @memvid/sdk
+The package automatically installs the correct binary for your platform (macOS, Linux, or Windows).
+
+Quick Start
+import { create } from "@memvid/sdk";
+
+// Create a memory file
+const mv = await create("notes.mv2");
+
+// Store some documents
+await mv.put({
+  title: "Project Update",
+  label: "meeting",
+  text: "Discussed Q4 roadmap. Alice will handle the frontend refactor.",
+  metadata: { date: "2024-01-15", attendees: ["Alice", "Bob"] }
+});
+
+await mv.put({
+  title: "Technical Decision",
+  label: "architecture",
+  text: "Decided to use PostgreSQL for the main database. Redis for caching.",
+});
+
+// Search by keyword
+const results = await mv.find("database");
+console.log(results.hits);
+
+// Ask a question
+const answer = await mv.ask("What database are we using?", {
+  model: "openai:gpt-4o-mini"
+});
+console.log(answer.text);
+
+// Close the file
+await mv.seal();
+Core API
+Opening and Creating
+import { create, use } from "@memvid/sdk";
+
+// Create a new memory file
+const mv = await create("notes.mv2");
+
+// Open an existing file
+const mv = await use("basic", "notes.mv2", { mode: "open" });
+
+// Create or open (auto mode)
+const mv = await use("basic", "notes.mv2", { mode: "auto" });
+
+// Open read-only
+const mv = await use("basic", "notes.mv2", { readOnly: true });
+Storing Documents
+// Store text content
+await mv.put({
+  title: "Meeting Notes",
+  label: "meeting",
+  text: "Discussed the new API design.",
+  metadata: { date: "2024-01-15", priority: "high" },
+  tags: ["api", "design", "q1"]
+});
+
+// Store a file (PDF, DOCX, TXT, etc.)
+await mv.put({
+  title: "Q4 Report",
+  label: "reports",
+  file: "./documents/q4-report.pdf"
+});
+
+// Store with both text and file
+await mv.put({
+  title: "Contract Summary",
+  label: "legal",
+  text: "Key terms: 2-year agreement, auto-renewal clause.",
+  file: "./contracts/agreement.pdf"
+});
+Batch Ingestion
+For large imports, putMany is significantly faster:
+
+const documents = [
+  { title: "Doc 1", label: "notes", text: "First document content..." },
+  { title: "Doc 2", label: "notes", text: "Second document content..." },
+  // ... thousands more
+];
+
+const frameIds = await mv.putMany(documents);
+console.log(`Added ${frameIds.length} documents`);
+Searching
+// Lexical search (BM25 ranking)
+const results = await mv.find("machine learning", { k: 10 });
+
+for (const hit of results.hits) {
+  console.log(`${hit.title}: ${hit.snippet}`);
+}
+Search options:
+
+Option	Type	Description
+k	number	Number of results (default: 10)
+snippetChars	number	Snippet length (default: 240)
+mode	string	"lex", "sem", or "auto"
+scope	string	Filter by URI prefix
+Semantic Search
+Semantic search requires embeddings. You can generate them during ingestion:
+
+// Using local embeddings (bge-small, nomic, etc.)
+await mv.put({
+  title: "Document",
+  text: "Content here...",
+  enableEmbedding: true,
+  embeddingModel: "bge-small"
+});
+
+// Using OpenAI embeddings
+await mv.put({
+  title: "Document",
+  text: "Content here...",
+  enableEmbedding: true,
+  embeddingModel: "openai-small"  // requires OPENAI_API_KEY
+});
+Then search semantically:
+
+const results = await mv.find("neural networks", { mode: "sem" });
+Windows users: Local embedding models (bge-small, nomic, etc.) are not available on Windows due to ONNX runtime limitations. Use OpenAI embeddings instead by setting OPENAI_API_KEY.
+
+Question Answering (RAG)
+// Basic RAG query
+const answer = await mv.ask("What did we decide about the database?");
+console.log(answer.text);
+
+// With specific model
+const answer = await mv.ask("Summarize the meeting notes", {
+  model: "openai:gpt-4o-mini",
+  k: 6  // number of documents to retrieve
+});
+
+// Get context only (no LLM synthesis)
+const context = await mv.ask("What was discussed?", { contextOnly: true });
+console.log(context.context);  // Retrieved document snippets
+Timeline and Stats
+// Get recent entries
+const entries = await mv.timeline({ limit: 20 });
+
+// Get statistics
+const stats = await mv.stats();
+console.log(`Documents: ${stats.frame_count}`);
+console.log(`Size: ${stats.size_bytes} bytes`);
+Closing
+Always close the memory when done:
+
+await mv.seal();
+External Embeddings
+For more control over embeddings, use external providers:
+
+import { create, OpenAIEmbeddings, getEmbedder } from "@memvid/sdk";
+
+// Create memory file
+const mv = await create("knowledge.mv2");
+
+// Initialize embedding provider
+const embedder = new OpenAIEmbeddings({ model: "text-embedding-3-small" });
+
+// Prepare documents
+const documents = [
+  { title: "ML Basics", label: "ai", text: "Machine learning enables systems to learn from data." },
+  { title: "Deep Learning", label: "ai", text: "Deep learning uses neural networks with multiple layers." },
+];
+
+// Ingest with external embeddings
+await mv.putMany(documents, { embedder });
+
+// Search using external embeddings
+const results = await mv.find("neural networks", { mode: "sem", k: 3, embedder });
+
+for (const hit of results.hits) {
+  console.log(`${hit.title}: ${hit.score.toFixed(3)}`);
+}
+Built-in providers:
+
+OpenAIEmbeddings (requires OPENAI_API_KEY)
+CohereEmbeddings (requires COHERE_API_KEY)
+VoyageEmbeddings (requires VOYAGE_API_KEY)
+NvidiaEmbeddings (requires NVIDIA_API_KEY)
+GeminiEmbeddings (requires GOOGLE_API_KEY or GEMINI_API_KEY)
+MistralEmbeddings (requires MISTRAL_API_KEY)
+Use the factory function for quick setup:
+
+import { getEmbedder } from "@memvid/sdk";
+
+// Create any supported provider
+const embedder = getEmbedder("openai");  // or "cohere", "voyage", "nvidia", "gemini", "mistral"
+Framework Integrations
+LangChain
+import { use } from "@memvid/sdk";
+
+const mv = await use("langchain", "notes.mv2");
+const tools = mv.tools;  // StructuredTool instances for agents
+LlamaIndex
+const mv = await use("llamaindex", "notes.mv2");
+const engine = mv.asQueryEngine();
+const response = await engine.query("What is the timeline?");
+OpenAI Function Calling
+const mv = await use("openai", "notes.mv2");
+const functions = mv.functions;  // JSON schemas for tool_calls
+Vercel AI SDK
+const mv = await use("vercel-ai", "notes.mv2");
+Error Handling
+Errors include a code for programmatic handling:
+
+import { MemvidError } from "@memvid/sdk";
+
+try {
+  await mv.put({ title: "Doc", text: "Content" });
+} catch (err) {
+  if (err instanceof MemvidError) {
+    switch (err.code) {
+      case "MV001": console.error("Storage capacity exceeded"); break;
+      case "MV007": console.error("File is locked"); break;
+      case "MV015": console.error("Embedding failed"); break;
+      default: console.error(`Error ${err.code}: ${err.message}`);
+    }
+  }
+}
+Common error codes:
+
+Code	Description
+MV001	Storage capacity exceeded
+MV007	File locked by another process
+MV010	Frame not found
+MV013	File not found
+MV015	Embedding failed
+Environment Variables
+Variable	Description
+OPENAI_API_KEY	For OpenAI embeddings and LLM synthesis
+OPENAI_BASE_URL	Custom OpenAI-compatible endpoint
+NVIDIA_API_KEY	For NVIDIA NIM embeddings
+MEMVID_MODELS_DIR	Local embedding model cache directory
+MEMVID_API_KEY	For capacity beyond the free tier
+MEMVID_OFFLINE	Set to 1 to disable network features
+Platform Support
+Platform	Architecture	Local Embeddings
+macOS	ARM64 (Apple Silicon)	Yes
+macOS	x64 (Intel)	Yes
+Linux	x64 (glibc)	Yes
+Windows	x64	No (use OpenAI)
+Requirements
+Node.js 18 or later
+For local embeddings: macOS or Linux (Windows requires OpenAI)
+More Information
+
+---
+
+Node.js SDK
+Node.js Examples
+Complete TypeScript examples for search, ask, and verification
+
+​
+Search and Ask
+import { use, create, Memvid } from '@memvid/sdk';
+
+async function searchExample() {
+  // Open existing memory
+  const mv: Memvid = await use('basic', 'notes.mv2', { readOnly: true });
+
+  // Search with options
+  const hits = await mv.find('deterministic', { k: 5, snippetChars: 200 });
+  console.log(`Found ${hits.total_hits} results`);
+  for (const hit of hits.hits) {
+    console.log(`  ${hit.score.toFixed(2)}: ${hit.title}`);
+  }
+
+  // Ask with LLM synthesis
+  const answer = await mv.ask('How does the WAL work?', {
+    model: 'openai:gpt-4o-mini',
+    modelApiKey: process.env.OPENAI_API_KEY,
+    k: 10
+  });
+  console.log(answer.answer);
+
+  // Timeline queries
+  const timeline = await mv.timeline({
+    since: 1730000000,
+    until: 1730003600,
+    limit: 20
+  });
+  console.log(`Timeline entries: ${timeline.length}`);
+}
+​
+Creating and Ingesting
+import { create, Memvid } from '@memvid/sdk';
+
+async function ingestExample() {
+  // Create new memory
+  const mv: Memvid = await create('knowledge.mv2');
+
+  // Enable lexical search
+  await mv.enableLex();
+
+  // Add documents with vector compression (for text content)
+  await mv.put({
+    title: 'API Documentation',
+    label: 'docs',
+    text: 'The API provides endpoints for search and retrieval...',
+    vectorCompression: true
+  });
+
+  // Add from file
+  await mv.put({
+    title: 'User Guide',
+    label: 'docs',
+    file: 'guide.pdf',
+    vectorCompression: true
+  });
+
+  await mv.seal();
+}
+​
+Verification and Repair
+import { use } from '@memvid/sdk';
+
+async function maintenanceExample() {
+  // Verify integrity
+  const result = await use.verify('notes.mv2', { deep: true }) as {
+    overall_status: string;
+    checks: unknown[];
+  };
+
+  if (result.overall_status === 'passed') {
+    console.log('File is valid');
+  } else {
+    console.log('Issues found:', result.checks);
+  }
+
+  // Repair if needed
+  const report = await use.doctor('notes.mv2', {
+    rebuildTimeIndex: true,
+    rebuildLexIndex: true,
+    vacuum: true
+  });
+  console.log('Repair complete:', report);
+}
+​
+Error Handling
+import { use, CapacityExceededError, LockedError } from '@memvid/sdk';
+
+async function errorHandlingExample() {
+  try {
+    const mv = await use('basic', 'knowledge.mv2');
+    await mv.put({
+      title: 'Large Document',
+      label: 'docs',
+      file: 'large-file.pdf',
+      vectorCompression: true
+    });
+    await mv.seal();
+  } catch (error) {
+    if (error instanceof CapacityExceededError) {
+      console.log('MV001: Capacity exceeded - upgrade plan');
+    } else if (error instanceof LockedError) {
+      console.log('MV007: File is locked by another process');
+    } else if (error instanceof Error) {
+      console.log('Error:', error.message);
+    }
+  }
+}
+​
+Express Server Example
+import express from 'express';
+import { open } from '@memvid/sdk';
+
+const app = express();
+app.use(express.json());
+
+// Reuse a shared-lock handle for the lifetime of the server.
+const mem = await open('knowledge.mv2', 'basic', { readOnly: true });
+
+app.post('/search', async (req, res) => {
+  const { query, k = 10 } = req.body;
+
+  const results = await mem.find(query, { k });
+  res.json(results);
+});
+
+app.post('/ask', async (req, res) => {
+  const { question } = req.body;
+
+  const answer = await mem.ask(question, {
+    model: 'openai:gpt-4o-mini',
+    modelApiKey: process.env.OPENAI_API_KEY,
+    maskPii: true,
+  });
+  res.json(answer);
+});
+
+app.listen(3000, () => console.log('Server running on port 3000'));
+​
+PDF Table Extraction
+import { create, Memvid } from '@memvid/sdk';
+
+async function tableExample() {
+  const mv: Memvid = await create('invoices.mv2');
+  await mv.enableLex();
+
+  // Extract tables from PDF
+  const result = await mv.putPdfTables('invoice.pdf', true);
+  console.log(`Extracted ${result.tables_count} tables`);
+
+  // List tables
+  const tables = await mv.listTables();
+  for (const table of tables) {
+    console.log(`  ${table.tableId}: ${table.nRows} x ${table.nCols}`);
+  }
+
+  // Get table data
+  const data = await mv.getTable('pdf_table_1_page1', 'dict') as {
+    headers?: string[];
+    rows?: unknown[][];
+  };
+  console.log('Headers:', data.headers);
+
+  // Export to CSV
+  const csv = await mv.getTable('pdf_table_1_page1', 'csv');
+  console.log(csv);
+
+  await mv.seal();
+}
