@@ -31,13 +31,27 @@ let mem;
 
 async function init() {
 
+
+
   // Open the existing memory file
+
+
 
   try {
 
-      mem = await use('basic', 'romance.mv2');
+
+
+      const dbPath = path.join(__dirname, 'romance.mv2');
+
+
+
+      mem = await use('basic', dbPath, { readOnly: true });
+
+
 
       console.log('Memory loaded.');
+
+
 
   } catch (err) {
 

@@ -16,5 +16,8 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "openai": "^6.15.0"
+  },
+  "optionalDependencies": {
+    "@memvid/sdk-linux-x64-gnu": "^2.0.146"
   }
 }
