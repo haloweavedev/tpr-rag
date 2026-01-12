@@ -275,9 +275,10 @@ app.post('/api/chat', async (req, res) => {
                 const prompt = `You are a helpful book recommendation assistant. Based on the following database excerpts, suggest some books that match the user's request.
                 
                 Guidelines:
-                1. Only suggest books found in the provided context.
-                2. Briefly explain WHY you are recommending them based on the review snippets.
-                3. Mention the author and any relevant tags like "Christmas romance".
+                1. Suggest AT LEAST 3 distinct books if available in the context.
+                2. Only suggest books found in the provided context.
+                3. Briefly explain WHY you are recommending them based on the review snippets.
+                4. Mention the author and any relevant tags like "Christmas romance".
 
         Context:
         ${contextText}
@@ -296,38 +297,44 @@ app.post('/api/chat', async (req, res) => {
 
         });
 
-
-
-        return res.json({ 
-
-            reply: completion.choices[0].message.content, 
-
-            sources: topHits.map(s => s.title) 
-
+        // Parse sources to extract metadata for UI
+        const structuredSources = topHits.map(h => {
+            const authorMatch = h.snippet.match(/Author:\s*(.+)/);
+            const genreMatch = h.snippet.match(/Genres:\s*(.+)/);
+            const sensualityMatch = h.snippet.match(/Sensuality:\s*(.+)/);
+            
+            return {
+                title: h.title,
+                author: authorMatch ? authorMatch[1].trim() : "Unknown Author",
+                genres: genreMatch ? genreMatch[1].trim() : "Unknown Genre",
+                sensuality: sensualityMatch ? sensualityMatch[1].trim() : null,
+                snippet: h.snippet
+            };
         });
 
+        return res.json({ 
+            reply: completion.choices[0].message.content, 
+            sources: structuredSources 
+        });
     }
 
-
-
     // Default: Standard mem.ask for general queries without specific keywords
-
     const answer = await mem.ask(message, {
-
         model: 'openai:gpt-4o-mini', 
-
         k: 10
-
     });
-
     
+    // For default ask, we might not have rich snippets, but we try to match structure
+    const defaultSources = answer.sources ? answer.sources.map(s => ({
+        title: s.title,
+        author: "Unknown (General Search)",
+        genres: "General",
+        snippet: s.snippet || ""
+    })) : [];
 
     res.json({ 
-
         reply: answer.answer, 
-
-        sources: answer.sources ? answer.sources.map(s => s.title) : [] 
-
+        sources: defaultSources
     });
 
 
