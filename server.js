@@ -8,33 +8,6 @@ const path = require('path');
 // Enable SDK debugging
 process.env.MEMVID_DEBUG = '1';
 
-// DEBUG: Inspect node_modules structure on Vercel
-try {
-  console.log("Current directory:", __dirname);
-  const rootModules = path.join(__dirname, 'node_modules');
-  if (fs.existsSync(rootModules)) {
-    console.log("node_modules exists at root");
-    const memvidPath = path.join(rootModules, '@memvid');
-    if (fs.existsSync(memvidPath)) {
-        console.log("@memvid exists. Listing contents:");
-        console.log(fs.readdirSync(memvidPath));
-        
-        const linuxPkg = path.join(memvidPath, 'sdk-linux-x64-gnu');
-        if (fs.existsSync(linuxPkg)) {
-           console.log("sdk-linux-x64-gnu contents:", fs.readdirSync(linuxPkg));
-        } else {
-           console.log("sdk-linux-x64-gnu NOT found");
-        }
-    } else {
-        console.log("@memvid folder NOT found in node_modules");
-    }
-  } else {
-    console.log("node_modules NOT found at", rootModules);
-  }
-} catch (e) {
-  console.error("Error inspecting file system:", e);
-}
-
 const { use } = require('@memvid/sdk');
 
 const OpenAI = require('openai');
@@ -95,9 +68,6 @@ async function init() {
           console.log(`Copying DB from ${originalDbPath} to ${tempDbPath}...`);
           fs.copyFileSync(originalDbPath, tempDbPath);
       }
-      
-      const stats = fs.statSync(tempDbPath);
-      console.log(`DB file size at ${tempDbPath}: ${stats.size} bytes`);
 
       console.log(`Loading memory from ${tempDbPath}...`);
       mem = await use('basic', tempDbPath, { readOnly: true });
@@ -158,43 +128,35 @@ app.post('/api/chat', async (req, res) => {
 
         
 
-                                const lexQuery = foundKeywords.join(" ");
+                                                const lexQuery = foundKeywords.join(" ");
 
         
 
-                        
+                                        
 
         
 
-                                const lexResults = await mem.find(lexQuery, { mode: 'lex', k: 50 });
+                                                const lexResults = await mem.find(lexQuery, { mode: 'lex', k: 50 });
 
         
 
-                        
+                                        
 
         
 
-                                console.log(`Lexical Hits for '${lexQuery}': ${lexResults.hits.length}`);
+                                                console.log(`Lexical Hits for '${lexQuery}': ${lexResults.hits.length}`);
 
         
 
-                                if (lexResults.hits.length > 0) {
+                                                
 
         
 
-                                    console.log(`Top 5 Lexical Titles: ${lexResults.hits.slice(0, 5).map(h => h.title).join(", ")}`);
+                                        
 
         
 
-                                }
-
-        
-
-                
-
-        
-
-                // B. Semantic Search for Full Query (High Recall/Understanding)
+                                                // B. Semantic Search for Full Query (High Recall/Understanding)
 
         
 
@@ -308,55 +270,19 @@ app.post('/api/chat', async (req, res) => {
 
                 // E. Generate Answer
 
-
-
                 const contextText = topHits.map((h, i) => `[Source #${i+1}: ${h.title}]\n${h.snippet}`).join("\n\n");
 
-
-
-                const prompt = `You are a helpful book recommendation assistant. 
-
-
-
-                STRICT RULES:
-
-
-
-                1. ONLY recommend books found in the [Source] context below.
-
-
-
-                2. If the user asks for a genre (e.g. Christmas) and you don't see any in the sources, say you don't have any in the current database.
-
-
-
-                3. Do NOT mention real-world books that are not in the context.
-
-
-
+                const prompt = `You are a helpful book recommendation assistant. Based on the following database excerpts, suggest some books that match the user's request.
                 
-
-
+                Guidelines:
+                1. Only suggest books found in the provided context.
+                2. Briefly explain WHY you are recommending them based on the review snippets.
+                3. Mention the author and any relevant tags like "Christmas romance".
 
         Context:
-
-
-
         ${contextText}
 
-
-
-        
-
-
-
         Question: ${message}
-
-
-
-        
-
-
 
         Answer:`;
 
