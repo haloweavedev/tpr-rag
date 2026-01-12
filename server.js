@@ -95,6 +95,9 @@ async function init() {
           console.log(`Copying DB from ${originalDbPath} to ${tempDbPath}...`);
           fs.copyFileSync(originalDbPath, tempDbPath);
       }
+      
+      const stats = fs.statSync(tempDbPath);
+      console.log(`DB file size at ${tempDbPath}: ${stats.size} bytes`);
 
       console.log(`Loading memory from ${tempDbPath}...`);
       mem = await use('basic', tempDbPath, { readOnly: true });
@@ -155,15 +158,35 @@ app.post('/api/chat', async (req, res) => {
 
         
 
-                const lexQuery = foundKeywords.join(" ");
+                                const lexQuery = foundKeywords.join(" ");
 
         
 
-                const lexResults = await mem.find(lexQuery, { mode: 'lex', k: 50 });
+                        
 
         
 
-                console.log(`Lexical Hits for '${lexQuery}': ${lexResults.hits.length}`);
+                                const lexResults = await mem.find(lexQuery, { mode: 'lex', k: 50 });
+
+        
+
+                        
+
+        
+
+                                console.log(`Lexical Hits for '${lexQuery}': ${lexResults.hits.length}`);
+
+        
+
+                                if (lexResults.hits.length > 0) {
+
+        
+
+                                    console.log(`Top 5 Lexical Titles: ${lexResults.hits.slice(0, 5).map(h => h.title).join(", ")}`);
+
+        
+
+                                }
 
         
 
