@@ -37,6 +37,7 @@ async function ingest() {
     const header = [
         `Title: ${meta.title || item.post.title}`,
         `Author: ${meta.author_first} ${meta.author_last}`,
+        `Cover: ${item.featured_image ? item.featured_image.url : ''}`,
         `Publisher: ${meta.publisher || 'Unknown'}`,
         `Publication Date: ${meta.publish_date || item.post.date}`,
         `Genres: ${genres}`,
@@ -58,7 +59,8 @@ async function ingest() {
         grade: meta.grade,
         date: meta.publish_date,
         publisher: meta.publisher,
-        url: item.post.permalink
+        url: item.post.permalink,
+        coverUrl: item.featured_image ? item.featured_image.url : null
       },
       tags: item.taxonomies['book-type'] ? item.taxonomies['book-type'].map(t => t.name) : [],
       enableEmbedding: true,

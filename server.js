@@ -300,12 +300,14 @@ app.post('/api/chat', async (req, res) => {
         // Parse sources to extract metadata for UI
         const structuredSources = topHits.map(h => {
             const authorMatch = h.snippet.match(/Author:\s*(.+)/);
+            const coverMatch = h.snippet.match(/Cover:\s*(.+)/);
             const genreMatch = h.snippet.match(/Genres:\s*(.+)/);
             const sensualityMatch = h.snippet.match(/Sensuality:\s*(.+)/);
             
             return {
                 title: h.title,
                 author: authorMatch ? authorMatch[1].trim() : "Unknown Author",
+                cover: coverMatch && coverMatch[1].trim() !== 'undefined' ? coverMatch[1].trim() : null,
                 genres: genreMatch ? genreMatch[1].trim() : "Unknown Genre",
                 sensuality: sensualityMatch ? sensualityMatch[1].trim() : null,
                 snippet: h.snippet
