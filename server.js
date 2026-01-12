@@ -2,10 +2,40 @@
 require('dotenv').config();
 
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
+
+// Enable SDK debugging
+process.env.MEMVID_DEBUG = '1';
+
+// DEBUG: Inspect node_modules structure on Vercel
+try {
+  console.log("Current directory:", __dirname);
+  const rootModules = path.join(__dirname, 'node_modules');
+  if (fs.existsSync(rootModules)) {
+    console.log("node_modules exists at root");
+    const memvidPath = path.join(rootModules, '@memvid');
+    if (fs.existsSync(memvidPath)) {
+        console.log("@memvid exists. Listing contents:");
+        console.log(fs.readdirSync(memvidPath));
+        
+        const linuxPkg = path.join(memvidPath, 'sdk-linux-x64-gnu');
+        if (fs.existsSync(linuxPkg)) {
+           console.log("sdk-linux-x64-gnu contents:", fs.readdirSync(linuxPkg));
+        } else {
+           console.log("sdk-linux-x64-gnu NOT found");
+        }
+    } else {
+        console.log("@memvid folder NOT found in node_modules");
+    }
+  } else {
+    console.log("node_modules NOT found at", rootModules);
+  }
+} catch (e) {
+  console.error("Error inspecting file system:", e);
+}
 
 const { use } = require('@memvid/sdk');
-
-const path = require('path');
 
 const OpenAI = require('openai');
 

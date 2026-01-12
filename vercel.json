@@ -1,0 +1,15 @@
+{
+  "functions": {
+    "api/**/*.js": {
+      "includeFiles": "node_modules/@memvid/**/*"
+    },
+    "server.js": {
+      "includeFiles": "node_modules/@memvid/**/*"
+    }
+  },
+  "build": {
+    "env": {
+      "ENABLE_VC_BUILD": "1"
+    }
+  }
+}
