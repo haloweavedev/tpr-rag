@@ -275,8 +275,8 @@ app.post('/api/chat', async (req, res) => {
                 const prompt = `You are a helpful book recommendation assistant. Based on the following database excerpts, suggest some books that match the user's request.
                 
                 Guidelines:
-                1. Suggest AT LEAST 3 distinct books if available in the context.
-                2. Only suggest books found in the provided context.
+                1. Suggest up to 3 distinct books found in the context.
+                2. If fewer than 3 relevant books are in the context, ONLY suggest the ones found. Do NOT hallucinate or mention outside books.
                 3. Briefly explain WHY you are recommending them based on the review snippets.
                 4. Mention the author and any relevant tags like "Christmas romance".
 
