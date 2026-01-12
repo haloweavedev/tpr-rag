@@ -51,9 +51,25 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 app.use(express.json());
 
-app.use(express.static('public'));
+// DEBUG: Check public folder
+const publicPath = path.join(__dirname, 'public');
+console.log("Public path:", publicPath);
+if (fs.existsSync(publicPath)) {
+    console.log("Public folder exists. Contents:", fs.readdirSync(publicPath));
+} else {
+    console.log("Public folder NOT found at:", publicPath);
+}
 
+app.use(express.static(publicPath));
 
+// Fallback for root
+app.get('/', (req, res) => {
+    if (fs.existsSync(path.join(publicPath, 'index.html'))) {
+        res.sendFile(path.join(publicPath, 'index.html'));
+    } else {
+        res.status(404).send('Index.html not found in public folder.');
+    }
+});
 
 let mem;
 
