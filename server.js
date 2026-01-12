@@ -71,11 +71,17 @@ async function init() {
 
 
 
-      const dbPath = path.join(__dirname, 'romance.mv2');
+      const originalDbPath = path.join(__dirname, 'romance.mv2');
+      const tempDbPath = path.join('/tmp', 'romance.mv2');
 
+      // Copy to /tmp if it doesn't exist (required for Vercel/Lambda read-only env)
+      if (!fs.existsSync(tempDbPath)) {
+          console.log(`Copying DB from ${originalDbPath} to ${tempDbPath}...`);
+          fs.copyFileSync(originalDbPath, tempDbPath);
+      }
 
-
-      mem = await use('basic', dbPath, { readOnly: true });
+      console.log(`Loading memory from ${tempDbPath}...`);
+      mem = await use('basic', tempDbPath, { readOnly: true });
 
 
 
