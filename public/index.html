@@ -117,7 +117,7 @@
     <main class="flex-1 w-full max-w-4xl mx-auto flex flex-col h-full relative pt-24 pb-4">
       
       <!-- Content Container -->
-      <div id="content-container" class="flex-1 overflow-y-auto px-[clamp(1.5rem,5vw,2rem)] scroll-smooth no-scrollbar flex flex-col justify-end pb-4">
+      <div id="content-container" class="flex-1 overflow-y-auto px-[clamp(1.5rem,5vw,2rem)] scroll-smooth no-scrollbar flex flex-col pb-4">
         
         <!-- WELCOME STATE (Initially Visible) -->
         <div id="welcome-view" class="flex flex-col items-center justify-center h-full min-h-[50vh] transition-all duration-500 ease-in-out opacity-100 transform translate-y-0">
@@ -252,7 +252,9 @@
       }
 
       function scrollToBottom() {
-        contentContainer.scrollTop = contentContainer.scrollHeight;
+        requestAnimationFrame(() => {
+          contentContainer.scrollTop = contentContainer.scrollHeight;
+        });
       }
 
       function createLoadingBubble() {
