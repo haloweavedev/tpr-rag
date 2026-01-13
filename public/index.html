@@ -220,6 +220,10 @@
       const welcomeView = document.getElementById('welcome-view');
       const contentContainer = document.getElementById('content-container');
       let isChatStarted = false;
+      
+      // Generate Session ID
+      const sessionId = crypto.randomUUID ? crypto.randomUUID() : 'session-' + Date.now() + '-' + Math.random().toString(36).substring(2);
+      console.log("Session ID:", sessionId);
 
       function switchToChatMode() {
           if (!isChatStarted) {
@@ -360,7 +364,7 @@
           const response = await fetch('/api/chat', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message: text })
+              body: JSON.stringify({ message: text, sessionId: sessionId })
           });
           
           const data = await response.json();

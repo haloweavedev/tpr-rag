@@ -20,6 +20,9 @@ app.use(express.static(publicPath));
 
 // Memory Initialization
 let mem;
+// Session Store (In-memory)
+const sessions = new Map();
+
 async function init() {
   try {
       const originalDbPath = path.join(__dirname, 'romance.mv2');
@@ -39,23 +42,36 @@ async function init() {
 }
 
 app.post('/api/chat', async (req, res) => {
-  const { message } = req.body;
+  const { message, sessionId = 'default' } = req.body;
   if (!message) return res.status(400).json({ error: 'Message is required' });
 
   try {
+    // Retrieve History
+    let history = sessions.get(sessionId) || [];
+    const recentHistory = history.slice(-6); // Last 3 turns
+    const historyText = recentHistory.map(h => `${h.role === 'user' ? 'User' : 'Minerva'}: ${h.content}`).join("\n");
+
     // 1. ROUTER & EXTRACTION STEP
-    // We ask GPT-4o-mini to classify and extract keywords.
-    const routerPrompt = `Analyze the user's message.
-    1. Is it a greeting or small talk (e.g. "hi", "hello", "how are you") with NO intent to find a book?
-    2. If it is a book request, extract specific search terms (book titles, authors, genres, tropes).
+    // We ask GPT-4o-mini to classify and extract keywords, GIVEN the history.
+    const routerPrompt = `Analyze the user's message in the context of the conversation.
+    
+    Conversation History:
+    ${historyText}
+    
+    Current Message: "${message}"
+
+    Tasks:
+    1. Is it a greeting/small talk with NO intent to find/discuss a book? (If they ask "tell me more", that is NOT small talk).
+    2. Extract search terms. 
+       - If the user refers to "it", "that book", "the first one", etc., YOU MUST RESOLVE THIS REFERENCE using the Conversation History.
+       - Extract the EXACT title of the book they are referring to.
+       - If they ask for "light" or "funny" books, extract those genre keywords.
     
     Output JSON ONLY:
     {
       "is_greeting": boolean,
-      "search_queries": string[] // e.g. ["Duet", "Julie Kriss"] or ["Christmas", "Romance"]
-    }
-    
-    User Message: "${message}"`;
+      "search_queries": string[] // e.g. ["The Rosie Project"] if resolving "it", or ["light romance", "funny"]
+    }`;
 
     const routerCompletion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
@@ -64,10 +80,11 @@ app.post('/api/chat', async (req, res) => {
     });
 
     const routerData = JSON.parse(routerCompletion.choices[0].message.content);
-    console.log("Router Decision:", routerData);
+    console.log("Router Decision:", JSON.stringify(routerData, null, 2));
 
-    // 2. BRANCH: Greeting
-    if (routerData.is_greeting) {
+    // 2. BRANCH: Greeting (Only if NO search queries are found AND it looks like a greeting)
+    // If router extracts queries (even from history), we skip greeting mode.
+    if (routerData.is_greeting && (!routerData.search_queries || routerData.search_queries.length === 0)) {
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
@@ -75,7 +92,16 @@ app.post('/api/chat', async (req, res) => {
                 { role: "user", content: message }
             ]
         });
-        return res.json({ reply: completion.choices[0].message.content, sources: [] });
+        
+        const reply = completion.choices[0].message.content;
+        
+        // Save to History
+        history.push({ role: 'user', content: message });
+        history.push({ role: 'assistant', content: reply });
+        if (history.length > 10) history = history.slice(-10);
+        sessions.set(sessionId, history);
+
+        return res.json({ reply, sources: [] });
     }
 
     // 3. BRANCH: Search (RAG)
@@ -113,26 +139,27 @@ app.post('/api/chat', async (req, res) => {
     
     const prompt = `You are Minerva, the intelligent, elegant, and warm AI curator for 'The Passionate Reader'.
     
-    Your goal is to recommend books based *only* on the provided Context.
+    Your goal is to recommend books or answer questions based on the Context and History.
     
+    CONVERSATION HISTORY:
+    ${historyText}
+
     CONTEXT:
     ${contextText}
     
     USER QUERY: ${message}
     
     INSTRUCTIONS:
-    1. **Analyze the Context**: Look for books that match the User Query.
-    2. **Conversational Fallback**: If the context contains NO relevant books for the specific request, reply conversationally as Minerva stating you couldn't find that specific information in your library, but offer to discuss the genre.
-    3. **Source Selection**: If you find relevant books, select the top 1-3 best matches.
-    4. **Response Format**:
-       - Write a warm, engaging response in Markdown.
-       - Bold book titles (e.g., **Book Title**).
-       - Explain *why* you chose each book based on the review snippets.
-       - **CRITICAL**: Do NOT output images or links in text.
-       - **CRITICAL**: At the very end of your response, output a hidden JSON block listing the Source IDs you actually used. Format:
-         
+    1. **Analyze**: Use History to understand references (e.g. "it", "that one"). Use Context to find facts.
+    2. **STRICT NO HALLUCINATION POLICY**: 
+       - You MUST ONLY recommend books that appear in the **CONTEXT** section above.
+       - If the user asks about a book that is NOT in the Context (even if it was mentioned in History), you must say: "I apologize, but I don't have the specific details for [Book Title] in my current library view to give you an accurate review."
+       - Do NOT invent reviews, plots, or authors.
+    3. **Answer**: Provide a specific answer. If recommending, suggest top 1-3 books from CONTEXT.
+    4. **Format**: Markdown, bold titles, clean text (NO images/links).
+    5. **Source Tracking**: Output hidden JSON at end listing Used Source IDs.
          |||JSON
-         {\"used_source_ids\": [0, 4]}
+         {\"used_source_ids\": [0]}
          |||
 
     5. **Tone**: Sophisticated, passionate, literate.
@@ -178,6 +205,12 @@ app.post('/api/chat', async (req, res) => {
             console.error("Failed to parse LLM source metadata", e);
         }
     }
+
+    // Save to History
+    history.push({ role: 'user', content: message });
+    history.push({ role: 'assistant', content: finalReply }); // Save cleaned reply
+    if (history.length > 10) history = history.slice(-10);
+    sessions.set(sessionId, history);
 
     res.json({ reply: finalReply, sources: finalSources });
 
