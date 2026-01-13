@@ -1,345 +1,185 @@
 
 require('dotenv').config();
-
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const { use } = require('@memvid/sdk');
+const OpenAI = require('openai');
 
 // Enable SDK debugging
 process.env.MEMVID_DEBUG = '1';
 
-const { use } = require('@memvid/sdk');
-
-const OpenAI = require('openai');
-
-
-
 const app = express();
-
 const PORT = 3000;
-
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-
 
 app.use(express.json());
 
-// DEBUG: Check public folder
 const publicPath = path.join(__dirname, 'public');
-console.log("Public path:", publicPath);
-if (fs.existsSync(publicPath)) {
-    console.log("Public folder exists. Contents:", fs.readdirSync(publicPath));
-} else {
-    console.log("Public folder NOT found at:", publicPath);
-}
-
 app.use(express.static(publicPath));
 
-// Fallback for root
-app.get('/', (req, res) => {
-    if (fs.existsSync(path.join(publicPath, 'index.html'))) {
-        res.sendFile(path.join(publicPath, 'index.html'));
-    } else {
-        res.status(404).send('Index.html not found in public folder.');
-    }
-});
-
+// Memory Initialization
 let mem;
-
-
-
 async function init() {
-
-
-
-  // Open the existing memory file
-
-
-
   try {
-
-
-
       const originalDbPath = path.join(__dirname, 'romance.mv2');
       const tempDbPath = path.join('/tmp', 'romance.mv2');
 
-      // Copy to /tmp if it doesn't exist (required for Vercel/Lambda read-only env)
       if (!fs.existsSync(tempDbPath)) {
           console.log(`Copying DB from ${originalDbPath} to ${tempDbPath}...`);
           fs.copyFileSync(originalDbPath, tempDbPath);
       }
-
       console.log(`Loading memory from ${tempDbPath}...`);
       mem = await use('basic', tempDbPath, { readOnly: true });
-
-
-
       console.log('Memory loaded.');
-
-
-
   } catch (err) {
-
       console.error("Failed to load memory:", err);
-
       process.exit(1);
-
   }
-
 }
 
-
-
 app.post('/api/chat', async (req, res) => {
-
   const { message } = req.body;
-
-  if (!message) {
-
-    return res.status(400).json({ error: 'Message is required' });
-
-  }
-
-
+  if (!message) return res.status(400).json({ error: 'Message is required' });
 
   try {
-
-    // 1. Keyword Extraction Strategy
-
-    // We look for specific genre/topic keywords to boost retrieval precision.
-
-    const keywords = ["Christmas", "Holiday", "Fantasy", "Mystery", "Thriller", "Historical", "Contemporary", "Rock Star", "Vampire", "Werewolf", "Sport", "Hockey", "Football", "Medical"];
-
-    const foundKeywords = keywords.filter(k => message.toLowerCase().includes(k.toLowerCase()));
-
-
-
-    if (foundKeywords.length > 0) {
-
-        console.log(`Detected keywords: ${foundKeywords.join(", ")}. Using Hybrid Search.`);
-
-        
-
-                // A. Lexical Search for Keywords (High Precision)
-
-        
-
-                // We search JUST for the keywords to ensure books with these tags/titles are found.
-
-        
-
-                                                const lexQuery = foundKeywords.join(" ");
-
-        
-
-                                        
-
-        
-
-                                                const lexResults = await mem.find(lexQuery, { mode: 'lex', k: 50 });
-
-        
-
-                                        
-
-        
-
-                                                console.log(`Lexical Hits for '${lexQuery}': ${lexResults.hits.length}`);
-
-        
-
-                                                
-
-        
-
-                                        
-
-        
-
-                                                // B. Semantic Search for Full Query (High Recall/Understanding)
-
-        
-
-                // We try semantic search, but fallback to lexical if embedding fails (as seen in tests)
-
-        
-
-                let semResults = { hits: [] };
-
-        
-
-                try {
-
-        
-
-                     // Pass embeddingModel explicitly if needed, but 'auto' should work if environment is set.
-
-        
-
-                     // If not, we catch.
-
-        
-
-                     semResults = await mem.find(message, { k: 20 }); 
-
-        
-
-                } catch (e) {
-
-        
-
-                     console.warn("Semantic search failed/skipped, using lexical for full query.");
-
-        
-
-                     semResults = await mem.find(message, { mode: 'lex', k: 20 });
-
-        
-
-                }
-
-        
-
-        
-
-        
-
-                // C. Merge and Deduplicate Results
-
-        
-
-                // We prioritize Lexical hits for specific keyword queries
-
-        
-
-                const allHits = [...lexResults.hits, ...semResults.hits];
-
-        
-
-                const uniqueHitsMap = new Map();
-
-        
-
-                for (const hit of allHits) {
-
-        
-
-                    if (!uniqueHitsMap.has(hit.id)) {
-
-        
-
-                        uniqueHitsMap.set(hit.id, hit);
-
-        
-
-                    }
-
-        
-
-                }
-
-        
-
-                const uniqueHits = Array.from(uniqueHitsMap.values());
-
-        
-
-        
-
-        
-
-                // D. Rerank/Filter (Optional - we'll let LLM decide relevance)
-
-        
-
-                // We take top 30 unique hits to ensure we capture the relevant ones.
-
-        
-
-                const topHits = uniqueHits.slice(0, 30);
-
-        
-
-        if (topHits.length === 0) {
-
-             return res.json({ reply: "I couldn't find any books matching those criteria.", sources: [] });
-
-        }
-
-
-
-                // E. Generate Answer
-
-                const contextText = topHits.map((h, i) => `[Source #${i+1}: ${h.title}]\n${h.snippet}`).join("\n\n");
-
-                const prompt = `You are a helpful book recommendation assistant. Based on the following database excerpts, suggest some books that match the user's request.
-                
-                Guidelines:
-                1. Suggest up to 3 distinct books found in the context.
-                2. If fewer than 3 relevant books are in the context, ONLY suggest the ones found. Do NOT hallucinate or mention outside books.
-                3. Briefly explain WHY you are recommending them based on the review snippets.
-                4. Mention the author and any relevant tags like "Christmas romance".
-
-        Context:
-        ${contextText}
-
-        Question: ${message}
-
-        Answer:`;
-
-
-
+    // 1. ROUTER & EXTRACTION STEP
+    // We ask GPT-4o-mini to classify and extract keywords.
+    const routerPrompt = `Analyze the user's message.
+    1. Is it a greeting or small talk (e.g. "hi", "hello", "how are you") with NO intent to find a book?
+    2. If it is a book request, extract specific search terms (book titles, authors, genres, tropes).
+    
+    Output JSON ONLY:
+    {
+      "is_greeting": boolean,
+      "search_queries": string[] // e.g. ["Duet", "Julie Kriss"] or ["Christmas", "Romance"]
+    }
+    
+    User Message: "${message}"`;
+
+    const routerCompletion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: routerPrompt }],
+        response_format: { type: "json_object" }
+    });
+
+    const routerData = JSON.parse(routerCompletion.choices[0].message.content);
+    console.log("Router Decision:", routerData);
+
+    // 2. BRANCH: Greeting
+    if (routerData.is_greeting) {
         const completion = await openai.chat.completions.create({
-
             model: "gpt-4o-mini",
-
-            messages: [{ role: "user", content: prompt }],
-
+            messages: [
+                { role: "system", content: "You are Minerva, the intelligent and elegant AI curator for 'The Passionate Reader'. Respond warmly, briefly, and sophisticatedly to the user's greeting. Invite them to ask for a book recommendation." },
+                { role: "user", content: message }
+            ]
         });
-
-        // Parse sources to extract metadata for UI
-        const structuredSources = topHits.map(h => {
-            const authorMatch = h.snippet.match(/Author:\s*(.+)/);
-            const coverMatch = h.snippet.match(/Cover:\s*(.+)/);
-            const genreMatch = h.snippet.match(/Genres:\s*(.+)/);
-            const sensualityMatch = h.snippet.match(/Sensuality:\s*(.+)/);
-            
-            return {
-                title: h.title,
-                author: authorMatch ? authorMatch[1].trim() : "Unknown Author",
-                cover: coverMatch && coverMatch[1].trim() !== 'undefined' ? coverMatch[1].trim() : null,
-                genres: genreMatch ? genreMatch[1].trim() : "Unknown Genre",
-                sensuality: sensualityMatch ? sensualityMatch[1].trim() : null,
-                snippet: h.snippet
-            };
-        });
-
-        return res.json({ 
-            reply: completion.choices[0].message.content, 
-            sources: structuredSources 
-        });
+        return res.json({ reply: completion.choices[0].message.content, sources: [] });
     }
 
-    // Default: Standard mem.ask for general queries without specific keywords
-    const answer = await mem.ask(message, {
-        model: 'openai:gpt-4o-mini', 
-        k: 10
-    });
+    // 3. BRANCH: Search (RAG)
+    let searchPromises = [];
     
-    // For default ask, we might not have rich snippets, but we try to match structure
-    const defaultSources = answer.sources ? answer.sources.map(s => ({
-        title: s.title,
-        author: "Unknown (General Search)",
-        genres: "General",
-        snippet: s.snippet || ""
-    })) : [];
+    // A. Lexical Search for each extracted term
+    if (routerData.search_queries && routerData.search_queries.length > 0) {
+        routerData.search_queries.forEach(q => {
+            searchPromises.push(mem.find(q, { mode: 'lex', k: 10 }));
+        });
+    }
+    
+    // B. Semantic Search for the full message (Contextual backup)
+    searchPromises.push(mem.find(message, { k: 10 }).catch(e => ({ hits: [] })));
 
-    res.json({ 
-        reply: answer.answer, 
-        sources: defaultSources
+    const searchResults = await Promise.all(searchPromises);
+    
+    // Merge & Deduplicate
+    const uniqueHitsMap = new Map();
+    searchResults.forEach(result => {
+        if (result && result.hits) {
+            result.hits.forEach(hit => {
+                if (!uniqueHitsMap.has(hit.id)) {
+                    uniqueHitsMap.set(hit.id, hit);
+                }
+            });
+        }
     });
 
+    const topHits = Array.from(uniqueHitsMap.values()).slice(0, 30);
+    console.log(`Found ${topHits.length} unique hits.`);
 
+    // 4. GENERATE RESPONSE
+    const contextText = topHits.map((h, i) => `[Source ID: ${i}]\nTitle: ${h.title}\nSnippet: ${h.snippet}`).join("\n\n");
+    
+    const prompt = `You are Minerva, the intelligent, elegant, and warm AI curator for 'The Passionate Reader'.
+    
+    Your goal is to recommend books based *only* on the provided Context.
+    
+    CONTEXT:
+    ${contextText}
+    
+    USER QUERY: ${message}
+    
+    INSTRUCTIONS:
+    1. **Analyze the Context**: Look for books that match the User Query.
+    2. **Conversational Fallback**: If the context contains NO relevant books for the specific request, reply conversationally as Minerva stating you couldn't find that specific information in your library, but offer to discuss the genre.
+    3. **Source Selection**: If you find relevant books, select the top 1-3 best matches.
+    4. **Response Format**:
+       - Write a warm, engaging response in Markdown.
+       - Bold book titles (e.g., **Book Title**).
+       - Explain *why* you chose each book based on the review snippets.
+       - **CRITICAL**: Do NOT output images or links in text.
+       - **CRITICAL**: At the very end of your response, output a hidden JSON block listing the Source IDs you actually used. Format:
+         
+         |||JSON
+         {\"used_source_ids\": [0, 4]}
+         |||
+
+    5. **Tone**: Sophisticated, passionate, literate.
+    `;
+
+    const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.3
+    });
+
+    let rawReply = completion.choices[0].message.content;
+    let finalReply = rawReply;
+    let finalSources = [];
+
+    // Parse Used Sources
+    // Regex to capture |||JSON ... ||| with optional spaces
+    const jsonMatch = rawReply.match(/\|\|\|\s*JSON([\s\S]*?)\|\|\|/i);
+    if (jsonMatch) {
+        try {
+            const jsonStr = jsonMatch[1].trim();
+            const metadata = JSON.parse(jsonStr);
+            
+            if (metadata.used_source_ids && Array.isArray(metadata.used_source_ids)) {
+                finalSources = metadata.used_source_ids.map(id => {
+                    const hit = topHits[id];
+                    if (!hit) return null;
+                    
+                    const authorMatch = hit.snippet.match(/Author:\s*(.+)/);
+                    const coverMatch = hit.snippet.match(/Cover:\s*(.+)/);
+                    const genreMatch = hit.snippet.match(/Genres:\s*(.+)/);
+                    
+                    return {
+                        title: hit.title,
+                        author: authorMatch ? authorMatch[1].trim() : "Unknown Author",
+                        cover: coverMatch && coverMatch[1].trim() !== 'undefined' ? coverMatch[1].trim() : null,
+                        genres: genreMatch ? genreMatch[1].trim() : "Romance"
+                    };
+                }).filter(s => s !== null);
+            }
+            finalReply = rawReply.replace(jsonMatch[0], '').trim();
+        } catch (e) {
+            console.error("Failed to parse LLM source metadata", e);
+        }
+    }
+
+    res.json({ reply: finalReply, sources: finalSources });
 
   } catch (error) {
     console.error('Chat error:', error);
